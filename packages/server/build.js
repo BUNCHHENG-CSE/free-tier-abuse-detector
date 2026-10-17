@@ -18,7 +18,7 @@ async function build() {
     format: 'cjs',
     outfile: path.resolve(distDir, 'index.js'),
     sourcemap: true,
-    external: ['node:sqlite', 'better-sqlite3', 'fsevents'],
+    external: ['node:sqlite', 'better-sqlite3', 'fsevents', 'pg', 'pg-native'],
   });
 
   console.log('✅ Server built successfully at dist/index.js');

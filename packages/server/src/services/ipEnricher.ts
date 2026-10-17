@@ -38,19 +38,23 @@ export function isPrivateIp(ip: string): boolean {
  * Checks if this device fingerprint has been hopping across multiple distinct IP addresses
  * in the last 12 hours (indicative of VPN rotating or proxy chains).
  */
-export function checkIpHop(appId: string, fingerprintId: string, currentIp: string): { isVpnOrHopping: boolean; recentDistinctIpsCount: number } {
+export async function checkIpHop(
+  appId: string,
+  fingerprintId: string,
+  currentIp: string
+): Promise<{ isVpnOrHopping: boolean; recentDistinctIpsCount: number }> {
   try {
     const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
-    const rows = db.prepare(`
-      SELECT DISTINCT ip_address FROM events
-      WHERE app_id = ? AND fingerprint_id = ? AND created_at > ?
-    `).all(appId, fingerprintId, twelveHoursAgo) as { ip_address: string }[];
+    const rows = await db.query<{ ip_address: string }>(
+      `SELECT DISTINCT ip_address FROM events
+       WHERE app_id = $1 AND fingerprint_id = $2 AND created_at > $3`,
+      [appId, fingerprintId, twelveHoursAgo]
+    );
 
     const ips = new Set(rows.map((r) => r.ip_address));
     ips.add(currentIp);
 
     const count = ips.size;
-    // If the same browser fingerprint presents 3 or more distinct IP addresses within 12 hours
     const isVpnOrHopping = count >= 3;
 
     return {

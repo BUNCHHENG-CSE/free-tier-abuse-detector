@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: abuseshield_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: abuseshield
+      POSTGRES_PASSWORD: abuseshield_secret
+      POSTGRES_DB: abuseshield_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - abuseshield_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    # Production-tuned parameters for high-throughput anti-abuse signal processing
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=64MB
+      -c effective_cache_size=768MB
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+      -c max_connections=100
+      -c statement_timeout=10000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abuseshield -d abuseshield_db"]
+      interval: 4s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  abuseshield_pgdata:
+    driver: local

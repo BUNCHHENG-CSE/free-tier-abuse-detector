@@ -26,29 +26,30 @@ export interface ClusterGraph {
   };
 }
 
-export function getClusterGraph(appId: string): ClusterGraph {
+export async function getClusterGraph(appId: string): Promise<ClusterGraph> {
   const nodesMap = new Map<string, ClusterNode>();
   const links: ClusterLink[] = [];
 
-  // 1. Fetch fingerprints with multi-accounting or multiple events
-  const fps = db.prepare(`
-    SELECT id, total_events, linked_accounts_count, primary_ip, is_banned
-    FROM fingerprints
-    WHERE app_id = ?
-    ORDER BY linked_accounts_count DESC, total_events DESC
-    LIMIT 30
-  `).all(appId) as {
+  // 1. Fetch fingerprints with multi-accounting or high activity
+  const fps = await db.query<{
     id: string;
     total_events: number;
     linked_accounts_count: number;
     primary_ip: string;
     is_banned: number;
-  }[];
+  }>(
+    `SELECT id, total_events, linked_accounts_count, primary_ip, is_banned
+     FROM fingerprints
+     WHERE app_id = $1
+     ORDER BY linked_accounts_count DESC, total_events DESC
+     LIMIT 30`,
+    [appId]
+  );
 
   let multiAccountDevices = 0;
   let totalAccountsInClusters = 0;
 
-  fps.forEach((fp) => {
+  for (const fp of fps) {
     if (fp.linked_accounts_count > 1) {
       multiAccountDevices++;
     }
@@ -80,12 +81,13 @@ export function getClusterGraph(appId: string): ClusterGraph {
     }
 
     // Fetch accounts linked to this fingerprint
-    const accounts = db.prepare(`
-      SELECT id, email, status, ip_address FROM accounts
-      WHERE app_id = ? AND fingerprint_id = ?
-      ORDER BY first_seen_at DESC
-      LIMIT 15
-    `).all(appId, fp.id) as { id: string; email: string; status: string; ip_address: string }[];
+    const accounts = await db.query<{ id: string; email: string; status: string; ip_address: string }>(
+      `SELECT id, email, status, ip_address FROM accounts
+       WHERE app_id = $1 AND fingerprint_id = $2
+       ORDER BY first_seen_at DESC
+       LIMIT 15`,
+      [appId, fp.id]
+    );
 
     totalAccountsInClusters += accounts.length;
 
@@ -106,7 +108,7 @@ export function getClusterGraph(appId: string): ClusterGraph {
         type: 'LINKED_TO',
       });
     });
-  });
+  }
 
   return {
     nodes: Array.from(nodesMap.values()),

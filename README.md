@@ -99,13 +99,38 @@ AbuseShield evaluates each registration and outputs a composite **Risk Score (0 
 ## 🚀 Quickstart Guide
 
 ### 1. Prerequisites
-- Node.js v20+ or v24+ (uses native `node:sqlite`)
-- npm v10+
+- Node.js v20+ or v24+
+- Docker & WSL2 (for production-grade PostgreSQL locally) OR zero-dependency SQLite fallback
 
-### 2. Start the Server & Dashboard
+### 2. Dual Database Engine (PostgreSQL & SQLite)
+AbuseShield supports **two execution profiles** via an asynchronous `DatabaseAdapter`:
+
+| Profile | Engine | Best For | Configuration |
+| :--- | :--- | :--- | :--- |
+| **Production & Local WSL Docker** | **PostgreSQL 16 Alpine** | High-throughput signal ingestion, multi-account graph lookups, concurrent JSONB indexing | Set `DATABASE_URL=postgres://...` in `.env` |
+| **Zero-Config Lightweight** | **Native `node:sqlite`** | Instant local hacking, offline testing, CI environments without Docker | Leave `DATABASE_URL` unset in `.env` |
+
+### 3. Production PostgreSQL Tuning & Schema Optimizations
+The PostgreSQL setup in `docker-compose.yml` and `docker/postgres/init.sql` includes:
+- **Buffer Pool**: `shared_buffers=256MB`, `effective_cache_size=768MB`, `work_mem=16MB`.
+- **NVMe / SSD Access Cost**: `random_page_cost=1.1`, `checkpoint_completion_target=0.9`.
+- **GIN Indexing**: Specialized `USING GIN (raw_signals jsonb_path_ops)` and `USING GIN (reasons jsonb_path_ops)` for sub-millisecond JSON query filtering.
+- **Partial Indexing**: High-velocity partial B-tree index `CREATE INDEX idx_review_pending ON review_queue (app_id, created_at DESC) WHERE status = 'pending';` keeping pending review lookups sub-millisecond even with millions of past events.
+- **Connection Pool**: Built with `pg.Pool` with connection timeouts, statement timeouts (`10000ms`), and graceful connection release.
+
+### 4. Running Locally with WSL Docker
 ```bash
-# Clone and start with single command:
-npm run start
+# 1. Start PostgreSQL in WSL Docker (tuned for high throughput)
+npm run docker:up
+
+# 2. Check container health status
+npm run docker:ps
+
+# 3. Start the AbuseShield backend and dashboard
+npm start
+
+# 4. Populate realistic demo abuse clusters (bot farm, VPN rotator, multi-account harvester)
+npm run db:seed
 ```
 The server will start at **`http://localhost:4000`**:
 - **Admin Dashboard**: [http://localhost:4000](http://localhost:4000)
@@ -113,11 +138,11 @@ The server will start at **`http://localhost:4000`**:
 - **Standalone SDK Bundle**: [http://localhost:4000/sdk/abuse-shield.min.js](http://localhost:4000/sdk/abuse-shield.min.js)
 - **REST API Endpoints**: [http://localhost:4000/api/v1](http://localhost:4000/api/v1)
 
-### 3. Run the Test Suites
+### 5. Run the Test Suites
 ```bash
 npm test
 ```
-Runs 8 automated unit & integration tests across the client SDK and backend risk engine.
+Runs 8 automated unit & integration tests across the client SDK and backend risk engine against the active database engine.
 
 ---
 

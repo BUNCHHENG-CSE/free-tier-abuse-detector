@@ -6,50 +6,61 @@ export const analyticsRouter = Router();
 
 const APP_ID = 'app_demo_default';
 
-analyticsRouter.get('/analytics/overview', (req: Request, res: Response) => {
+analyticsRouter.get('/analytics/overview', async (req: Request, res: Response) => {
   try {
-    const totalEvents = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM events WHERE app_id = ?
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const totalEventsRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1`,
+      [APP_ID]
+    );
+    const totalEvents = parseInt(String(totalEventsRow?.cnt || 0), 10);
 
-    const totalSignups = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM events WHERE app_id = ? AND event_type = 'signup'
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const totalSignupsRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND event_type = 'signup'`,
+      [APP_ID]
+    );
+    const totalSignups = parseInt(String(totalSignupsRow?.cnt || 0), 10);
 
-    const flaggedCount = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM events WHERE app_id = ? AND status IN ('flagged', 'rejected', 'abuser')
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const flaggedRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND status IN ('flagged', 'rejected', 'abuser')`,
+      [APP_ID]
+    );
+    const flaggedCount = parseInt(String(flaggedRow?.cnt || 0), 10);
 
-    const pendingReviewCount = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM review_queue WHERE app_id = ? AND status = 'pending'
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const pendingRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM review_queue WHERE app_id = $1 AND status = 'pending'`,
+      [APP_ID]
+    );
+    const pendingReviewCount = parseInt(String(pendingRow?.cnt || 0), 10);
 
-    const multiAccountFpCount = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = ? AND linked_accounts_count > 1
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const multiAccountFpRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = $1 AND linked_accounts_count > 1`,
+      [APP_ID]
+    );
+    const multiAccountFpCount = parseInt(String(multiAccountFpRow?.cnt || 0), 10);
 
     const denominator = totalSignups > 0 ? totalSignups : (totalEvents > 0 ? totalEvents : 1);
     const abuseSharePercent = parseFloat(((flaggedCount / denominator) * 100).toFixed(1));
-
-    // Estimated revenue leakage prevented: each abuse account costs ~$12 in free AI compute / database quota
     const estimatedSavings = flaggedCount * 12;
 
-    // 24-hour activity timeline (hourly buckets)
+    // 24-hour activity timeline
     const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const recentEvents = db.prepare(`
-      SELECT created_at, status FROM events
-      WHERE app_id = ? AND created_at > ?
-      ORDER BY created_at ASC
-    `).all(APP_ID, twentyFourHoursAgo) as { created_at: number; status: string }[];
+    const recentEvents = await db.query<{ created_at: number | string; status: string }>(
+      `SELECT created_at, status FROM events
+       WHERE app_id = $1 AND created_at > $2
+       ORDER BY created_at ASC`,
+      [APP_ID, twentyFourHoursAgo]
+    );
 
-    // Bucket into 12 two-hour intervals
     const timelineBuckets: { time: string; total: number; flagged: number }[] = [];
     for (let i = 11; i >= 0; i--) {
       const bucketEnd = Date.now() - i * 2 * 60 * 60 * 1000;
       const bucketStart = bucketEnd - 2 * 60 * 60 * 1000;
       const hourLabel = new Date(bucketEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      const inBucket = recentEvents.filter((e) => e.created_at >= bucketStart && e.created_at < bucketEnd);
+      const inBucket = recentEvents.filter((e) => {
+        const t = parseInt(String(e.created_at), 10);
+        return t >= bucketStart && t < bucketEnd;
+      });
       const flaggedInBucket = inBucket.filter((e) => ['flagged', 'rejected', 'abuser'].includes(e.status));
 
       timelineBuckets.push({
@@ -60,20 +71,20 @@ analyticsRouter.get('/analytics/overview', (req: Request, res: Response) => {
     }
 
     // Top triggered reasons
-    const recentFlagged = db.prepare(`
-      SELECT reasons FROM events
-      WHERE app_id = ? AND status IN ('flagged', 'rejected', 'abuser')
-      ORDER BY created_at DESC
-      LIMIT 100
-    `).all(APP_ID) as { reasons: string }[];
+    const recentFlagged = await db.query<{ reasons: any }>(
+      `SELECT reasons FROM events
+       WHERE app_id = $1 AND status IN ('flagged', 'rejected', 'abuser')
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [APP_ID]
+    );
 
     const reasonCounts: Record<string, number> = {};
     recentFlagged.forEach((row) => {
       try {
-        const parsed = JSON.parse(row.reasons);
+        const parsed = typeof row.reasons === 'string' ? JSON.parse(row.reasons) : row.reasons;
         if (Array.isArray(parsed)) {
           parsed.forEach((r: string) => {
-            // Simplify reason string for chart categorization
             let category = 'Other Risk Signal';
             if (/velocity/i.test(r)) category = 'Excessive 24h Velocity';
             else if (/distinct accounts/i.test(r)) category = 'Multi-Account Clustering';
@@ -86,9 +97,7 @@ analyticsRouter.get('/analytics/overview', (req: Request, res: Response) => {
             reasonCounts[category] = (reasonCounts[category] || 0) + 1;
           });
         }
-      } catch {
-        // Ignored
-      }
+      } catch {}
     });
 
     const topReasons = Object.entries(reasonCounts)
@@ -112,9 +121,9 @@ analyticsRouter.get('/analytics/overview', (req: Request, res: Response) => {
   }
 });
 
-analyticsRouter.get('/analytics/clusters', (req: Request, res: Response) => {
+analyticsRouter.get('/analytics/clusters', async (req: Request, res: Response) => {
   try {
-    const graph = getClusterGraph(APP_ID);
+    const graph = await getClusterGraph(APP_ID);
     res.json(graph);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

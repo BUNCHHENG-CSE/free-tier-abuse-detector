@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db/database';
 import { evaluateRisk } from '../services/riskEngine';
 import { extractClientIp } from '../services/ipEnricher';
@@ -6,21 +6,19 @@ import { extractClientIp } from '../services/ipEnricher';
 export const ingestRouter = Router();
 
 // Middleware: Resolve App by API Key
-function resolveApp(req: Request, res: Response, next: () => void) {
+async function resolveApp(req: Request, res: Response, next: NextFunction) {
   const apiKey =
     (req.headers['x-abuseshield-key'] as string) ||
     (req.query.apiKey as string) ||
     req.body.apiKey;
 
   if (!apiKey) {
-    // If running in local demo without explicit key, default to demo app
     (req as any).appId = 'app_demo_default';
     return next();
   }
 
-  const app = db.prepare('SELECT id FROM apps WHERE api_key = ?').get(apiKey) as { id: string } | undefined;
+  const app = await db.queryOne<{ id: string }>('SELECT id FROM apps WHERE api_key = $1', [apiKey]);
   if (!app) {
-    // Check if it's default key
     if (apiKey === 'pk_live_abuseshield_demo' || apiKey === 'anon') {
       (req as any).appId = 'app_demo_default';
       return next();
@@ -92,23 +90,24 @@ ingestRouter.post('/telemetry', resolveApp, async (req: Request, res: Response) 
     const now = Date.now();
     const eventId = `ev_telem_${now}_${Math.random().toString(36).slice(2, 7)}`;
 
-    db.prepare(`
-      INSERT INTO events (
+    await db.execute(
+      `INSERT INTO events (
         id, app_id, event_type, email, normalized_email, user_id,
         fingerprint_id, client_token, ip_address, user_agent,
         risk_score, risk_level, reasons, status, raw_signals, created_at
       )
-      VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 'LOW', '[]', 'telemetry', ?, ?)
-    `).run(
-      eventId,
-      appId,
-      eventType,
-      clientFingerprintId,
-      clientToken || null,
-      ipAddress,
-      req.headers['user-agent'] || null,
-      signals ? JSON.stringify(signals) : null,
-      now
+      VALUES ($1, $2, $3, NULL, NULL, NULL, $4, $5, $6, $7, 0, 'LOW', '[]', 'telemetry', $8, $9)`,
+      [
+        eventId,
+        appId,
+        eventType,
+        clientFingerprintId,
+        clientToken || null,
+        ipAddress,
+        req.headers['user-agent'] || null,
+        signals || null,
+        now,
+      ]
     );
 
     res.json({ success: true, eventId });

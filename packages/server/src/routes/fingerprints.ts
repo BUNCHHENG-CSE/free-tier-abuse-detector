@@ -8,7 +8,7 @@ const APP_ID = 'app_demo_default';
 /**
  * List fingerprints with search and pagination
  */
-fingerprintsRouter.get('/fingerprints', (req: Request, res: Response) => {
+fingerprintsRouter.get('/fingerprints', async (req: Request, res: Response) => {
   try {
     const search = ((req.query.search as string) || '').trim().toLowerCase();
     const limit = Math.min(100, parseInt(req.query.limit as string) || 50);
@@ -18,23 +18,30 @@ fingerprintsRouter.get('/fingerprints', (req: Request, res: Response) => {
       SELECT id, first_seen_at, last_seen_at, total_events, linked_accounts_count,
              primary_ip, canvas_hash, webgl_renderer, tags, is_banned
       FROM fingerprints
-      WHERE app_id = ?
+      WHERE app_id = $1
     `;
     const params: any[] = [APP_ID];
 
     if (search) {
-      query += ` AND (LOWER(id) LIKE ? OR LOWER(primary_ip) LIKE ? OR LOWER(tags) LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      params.push(`%${search}%`);
+      const pIdx = params.length;
+      query += ` AND (LOWER(id) LIKE $${pIdx} OR LOWER(primary_ip) LIKE $${pIdx} OR LOWER(tags) LIKE $${pIdx})`;
     }
 
-    query += ` ORDER BY linked_accounts_count DESC, last_seen_at DESC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
+    params.push(limit);
+    const limitIdx = params.length;
+    params.push(offset);
+    const offsetIdx = params.length;
 
-    const fingerprints = db.prepare(query).all(...params);
+    query += ` ORDER BY linked_accounts_count DESC, last_seen_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
 
-    const totalCount = (db.prepare(`
-      SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = ?
-    `).get(APP_ID) as { cnt: number }).cnt;
+    const fingerprints = await db.query(query, params);
+
+    const totalRow = await db.queryOne<{ cnt: number | string }>(
+      `SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = $1`,
+      [APP_ID]
+    );
+    const totalCount = parseInt(String(totalRow?.cnt || 0), 10);
 
     res.json({
       fingerprints,
@@ -50,41 +57,39 @@ fingerprintsRouter.get('/fingerprints', (req: Request, res: Response) => {
 /**
  * Get fingerprint details and all associated accounts and events
  */
-fingerprintsRouter.get('/fingerprints/:id', (req: Request, res: Response) => {
+fingerprintsRouter.get('/fingerprints/:id', async (req: Request, res: Response) => {
   try {
     const fpId = req.params.id;
-    const fp = db.prepare(`
-      SELECT * FROM fingerprints WHERE id = ? AND app_id = ?
-    `).get(fpId, APP_ID);
+    const fp = await db.queryOne(
+      `SELECT * FROM fingerprints WHERE id = $1 AND app_id = $2`,
+      [fpId, APP_ID]
+    );
 
     if (!fp) {
       return res.status(404).json({ error: 'Fingerprint not found' });
     }
 
-    const accounts = db.prepare(`
-      SELECT id, email, status, first_seen_at, last_seen_at, ip_address
-      FROM accounts
-      WHERE app_id = ? AND fingerprint_id = ?
-      ORDER BY first_seen_at DESC
-    `).all(APP_ID, fpId);
+    const accounts = await db.query(
+      `SELECT id, email, status, first_seen_at, last_seen_at, ip_address
+       FROM accounts
+       WHERE app_id = $1 AND fingerprint_id = $2
+       ORDER BY first_seen_at DESC`,
+      [APP_ID, fpId]
+    );
 
-    const events = db.prepare(`
-      SELECT id, event_type, email, ip_address, risk_score, risk_level, reasons, status, created_at
-      FROM events
-      WHERE app_id = ? AND fingerprint_id = ?
-      ORDER BY created_at DESC
-      LIMIT 25
-    `).all(APP_ID, fpId) as any[];
-
-    const parsedEvents = events.map((ev) => ({
-      ...ev,
-      reasons: typeof ev.reasons === 'string' ? JSON.parse(ev.reasons) : ev.reasons,
-    }));
+    const events = await db.query(
+      `SELECT id, event_type, email, ip_address, risk_score, risk_level, reasons, status, created_at
+       FROM events
+       WHERE app_id = $1 AND fingerprint_id = $2
+       ORDER BY created_at DESC
+       LIMIT 25`,
+      [APP_ID, fpId]
+    );
 
     res.json({
       fingerprint: fp,
       accounts,
-      events: parsedEvents,
+      events,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -94,16 +99,17 @@ fingerprintsRouter.get('/fingerprints/:id', (req: Request, res: Response) => {
 /**
  * Toggle ban / whitelist on a fingerprint
  */
-fingerprintsRouter.post('/fingerprints/:id/ban', (req: Request, res: Response) => {
+fingerprintsRouter.post('/fingerprints/:id/ban', async (req: Request, res: Response) => {
   try {
     const fpId = req.params.id;
     const { isBanned = true } = req.body;
 
-    db.prepare(`
-      UPDATE fingerprints
-      SET is_banned = ?, tags = ?
-      WHERE id = ? AND app_id = ?
-    `).run(isBanned ? 1 : 0, isBanned ? 'banned' : 'active', fpId, APP_ID);
+    await db.execute(
+      `UPDATE fingerprints
+       SET is_banned = $1, tags = $2
+       WHERE id = $3 AND app_id = $4`,
+      [isBanned ? 1 : 0, isBanned ? 'banned' : 'active', fpId, APP_ID]
+    );
 
     res.json({ success: true, fingerprintId: fpId, isBanned });
   } catch (err: any) {

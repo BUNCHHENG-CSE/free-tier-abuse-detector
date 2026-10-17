@@ -39,7 +39,6 @@ simulateRouter.post('/simulate/scenario', async (req: Request, res: Response) =>
     }
 
     if (scenario === 'vpn_multi_accounting') {
-      // The same browser hardware fingerprint cycling 3 different VPN IPs
       const sharedFpId = `fp_vpn_syndicate_88a`;
       const vpnIps = ['185.220.101.5', '194.26.29.112', '45.154.255.89'];
       const results = [];
@@ -118,11 +117,10 @@ simulateRouter.post('/simulate/scenario', async (req: Request, res: Response) =>
     }
 
     if (scenario === 'seed_demo_data') {
-      // Clear existing demo events & accounts
-      db.prepare('DELETE FROM review_queue WHERE app_id = ?').run(APP_ID);
-      db.prepare('DELETE FROM accounts WHERE app_id = ?').run(APP_ID);
-      db.prepare('DELETE FROM fingerprints WHERE app_id = ?').run(APP_ID);
-      db.prepare('DELETE FROM events WHERE app_id = ?').run(APP_ID);
+      await db.execute('DELETE FROM review_queue WHERE app_id = $1', [APP_ID]);
+      await db.execute('DELETE FROM accounts WHERE app_id = $1', [APP_ID]);
+      await db.execute('DELETE FROM fingerprints WHERE app_id = $1', [APP_ID]);
+      await db.execute('DELETE FROM events WHERE app_id = $1', [APP_ID]);
 
       // 1. Seed Clean Legitimate Users
       const legitUsers = [
@@ -228,6 +226,7 @@ simulateRouter.post('/simulate/scenario', async (req: Request, res: Response) =>
 
     res.status(400).json({ error: 'Unknown scenario' });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[Simulate Route Error]', err);
+    res.status(500).json({ error: err?.message || String(err), stack: err?.stack });
   }
 });

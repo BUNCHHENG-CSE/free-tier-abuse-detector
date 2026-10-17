@@ -14,7 +14,12 @@
     "dev:server": "npm --workspace=@abuseshield/server run dev",
     "dev:dashboard": "npm --workspace=@abuseshield/dashboard run dev",
     "start": "node packages/server/dist/index.js",
-    "test": "node --test packages/sdk/dist/sdk.test.js packages/server/dist/server.test.js"
+    "test": "node --test packages/sdk/dist/sdk.test.js packages/server/dist/server.test.js",
+    "docker:up": "wsl docker compose up -d",
+    "docker:down": "wsl docker compose down",
+    "docker:logs": "wsl docker logs -f abuseshield_postgres",
+    "docker:ps": "wsl docker ps",
+    "db:seed": "node -e \"fetch('http://localhost:4000/api/v1/simulate/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: 'seed_demo_data' }) }).then(r => r.json()).then(console.log)\""
   },
   "keywords": [
     "fingerprint",

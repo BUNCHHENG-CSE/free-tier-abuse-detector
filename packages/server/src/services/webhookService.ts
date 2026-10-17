@@ -14,12 +14,15 @@ export interface WebhookPayload {
 
 export async function dispatchWebhookIfConfigured(appId: string, payload: WebhookPayload): Promise<void> {
   try {
-    const app = db.prepare('SELECT webhook_url FROM apps WHERE id = ?').get(appId) as { webhook_url?: string } | undefined;
+    const app = await db.queryOne<{ webhook_url?: string }>(
+      'SELECT webhook_url FROM apps WHERE id = $1',
+      [appId]
+    );
+
     if (!app || !app.webhook_url || !app.webhook_url.startsWith('http')) {
       return;
     }
 
-    // Fire and forget, with a timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
 
