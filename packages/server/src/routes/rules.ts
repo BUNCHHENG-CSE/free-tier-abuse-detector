@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 import { getAppRules } from '../services/riskEngine';
 
 export const rulesRouter = Router();
@@ -11,6 +12,21 @@ const APP_ID = 'app_demo_default';
  */
 rulesRouter.get('/rules', async (req: Request, res: Response) => {
   try {
+    if (db.isPostgres) {
+      const [rules, app] = await Promise.all([
+        getAppRules(APP_ID),
+        prisma.app.findUnique({
+          where: { id: APP_ID },
+          select: { name: true, apiKey: true, webhookUrl: true },
+        }),
+      ]);
+
+      return res.json({
+        rules,
+        app: app ? { name: app.name, api_key: app.apiKey, webhook_url: app.webhookUrl } : null,
+      });
+    }
+
     const rules = await getAppRules(APP_ID);
     const app = await db.queryOne(
       'SELECT name, api_key, webhook_url FROM apps WHERE id = $1',
@@ -43,6 +59,54 @@ rulesRouter.put('/rules', async (req: Request, res: Response) => {
     } = req.body;
 
     const now = Date.now();
+
+    if (db.isPostgres) {
+      await prisma.$transaction(async (tx) => {
+        await tx.rule.upsert({
+          where: { appId: APP_ID },
+          update: {
+            maxRegistrations24h: max_registrations_24h !== undefined ? Number(max_registrations_24h) : undefined,
+            maxAccountsPerFp: max_accounts_per_fp !== undefined ? Number(max_accounts_per_fp) : undefined,
+            flagDisposableEmail: flag_disposable_email !== undefined ? (flag_disposable_email ? 1 : 0) : undefined,
+            flagHeadlessBot: flag_headless_bot !== undefined ? (flag_headless_bot ? 1 : 0) : undefined,
+            flagIpHopping: flag_ip_hopping !== undefined ? (flag_ip_hopping ? 1 : 0) : undefined,
+            minScoreToFlag: min_score_to_flag !== undefined ? Number(min_score_to_flag) : undefined,
+            webhookOnFlag: webhook_on_flag !== undefined ? (webhook_on_flag ? 1 : 0) : undefined,
+            updatedAt: BigInt(now),
+          },
+          create: {
+            appId: APP_ID,
+            maxRegistrations24h: max_registrations_24h ?? 3,
+            maxAccountsPerFp: max_accounts_per_fp ?? 2,
+            flagDisposableEmail: flag_disposable_email ? 1 : 0,
+            flagHeadlessBot: flag_headless_bot ? 1 : 0,
+            flagIpHopping: flag_ip_hopping ? 1 : 0,
+            minScoreToFlag: min_score_to_flag ?? 35,
+            webhookOnFlag: webhook_on_flag ? 1 : 0,
+            updatedAt: BigInt(now),
+          },
+        });
+
+        if (webhook_url !== undefined) {
+          await tx.app.update({
+            where: { id: APP_ID },
+            data: { webhookUrl: webhook_url },
+          });
+        }
+      });
+
+      const updatedRules = await getAppRules(APP_ID);
+      const updatedApp = await prisma.app.findUnique({
+        where: { id: APP_ID },
+        select: { name: true, apiKey: true, webhookUrl: true },
+      });
+
+      return res.json({
+        success: true,
+        rules: updatedRules,
+        app: updatedApp ? { name: updatedApp.name, api_key: updatedApp.apiKey, webhook_url: updatedApp.webhookUrl } : null,
+      });
+    }
 
     await db.execute(
       `UPDATE rules

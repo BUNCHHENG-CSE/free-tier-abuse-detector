@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 
 export const fingerprintsRouter = Router();
 
@@ -60,6 +61,36 @@ fingerprintsRouter.get('/fingerprints', async (req: Request, res: Response) => {
 fingerprintsRouter.get('/fingerprints/:id', async (req: Request, res: Response) => {
   try {
     const fpId = req.params.id;
+
+    if (db.isPostgres) {
+      const [fp, accounts, events] = await Promise.all([
+        prisma.fingerprint.findUnique({
+          where: { id_appId: { id: fpId, appId: APP_ID } },
+        }),
+        prisma.account.findMany({
+          where: { appId: APP_ID, fingerprintId: fpId },
+          orderBy: { firstSeenAt: 'desc' },
+          select: { id: true, email: true, status: true, firstSeenAt: true, lastSeenAt: true, ipAddress: true },
+        }),
+        prisma.event.findMany({
+          where: { appId: APP_ID, fingerprintId: fpId },
+          orderBy: { createdAt: 'desc' },
+          take: 25,
+          select: { id: true, eventType: true, email: true, ipAddress: true, riskScore: true, riskLevel: true, reasons: true, status: true, createdAt: true },
+        }),
+      ]);
+
+      if (!fp) {
+        return res.status(404).json({ error: 'Fingerprint not found' });
+      }
+
+      return res.json({
+        fingerprint: fp,
+        accounts,
+        events,
+      });
+    }
+
     const fp = await db.queryOne(
       `SELECT * FROM fingerprints WHERE id = $1 AND app_id = $2`,
       [fpId, APP_ID]
@@ -103,6 +134,27 @@ fingerprintsRouter.post('/fingerprints/:id/ban', async (req: Request, res: Respo
   try {
     const fpId = req.params.id;
     const { isBanned = true } = req.body;
+
+    if (db.isPostgres) {
+      await prisma.$transaction(async (tx) => {
+        await tx.fingerprint.update({
+          where: { id_appId: { id: fpId, appId: APP_ID } },
+          data: {
+            isBanned: isBanned ? 1 : 0,
+            tags: isBanned ? 'banned' : 'active',
+          },
+        });
+
+        if (isBanned) {
+          await tx.account.updateMany({
+            where: { fingerprintId: fpId, appId: APP_ID },
+            data: { status: 'banned' },
+          });
+        }
+      });
+
+      return res.json({ success: true, fingerprintId: fpId, isBanned });
+    }
 
     await db.execute(
       `UPDATE fingerprints

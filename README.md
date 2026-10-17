@@ -40,8 +40,9 @@ Free-Tier Abuse Detection & Lightweight Fingerprint SDK/
 │   │   └── dist/                # abuse-shield.min.js (5.2KB gz), index.esm.js, index.cjs
 │   │
 │   ├── server/                  # Anti-Abuse Backend & Risk Scoring Engine
+│   │   ├── prisma/              # Prisma ORM schema & migrations for PostgreSQL
 │   │   ├── src/
-│   │   │   ├── db/              # Native node:sqlite with WAL mode & zero C++ dependencies
+│   │   │   ├── db/              # Prisma Client singleton, PostgreSQL pool & SQLite fallback
 │   │   │   ├── services/        # RiskEngine, EmailValidator, IPEnricher, ClusterService
 │   │   │   └── routes/          # /verify, /review-queue, /fingerprints, /rules, /analytics
 │   │   └── dist/
@@ -102,29 +103,29 @@ AbuseShield evaluates each registration and outputs a composite **Risk Score (0 
 - Node.js v20+ or v24+
 - Docker & WSL2 (for production-grade PostgreSQL locally) OR zero-dependency SQLite fallback
 
-### 2. Dual Database Engine (PostgreSQL & SQLite)
-AbuseShield supports **two execution profiles** via an asynchronous `DatabaseAdapter`:
+### 2. Dual Database Engine with Prisma ORM
+AbuseShield supports **two execution profiles** with Prisma ORM:
 
-| Profile | Engine | Best For | Configuration |
+| Profile | Engine / ORM | Best For | Configuration |
 | :--- | :--- | :--- | :--- |
-| **Production & Local WSL Docker** | **PostgreSQL 16 Alpine** | High-throughput signal ingestion, multi-account graph lookups, concurrent JSONB indexing | Set `DATABASE_URL=postgres://...` in `.env` |
+| **Production & Local WSL Docker** | **PostgreSQL 16 + Prisma ORM 6** | Strongly-typed queries, atomic transactions, batching (zero N+1), GIN JSONB indexing | Set `DATABASE_URL=postgres://...` in `.env` |
 | **Zero-Config Lightweight** | **Native `node:sqlite`** | Instant local hacking, offline testing, CI environments without Docker | Leave `DATABASE_URL` unset in `.env` |
 
-### 3. Production PostgreSQL Tuning & Schema Optimizations
-The PostgreSQL setup in `docker-compose.yml` and `docker/postgres/init.sql` includes:
-- **Buffer Pool**: `shared_buffers=256MB`, `effective_cache_size=768MB`, `work_mem=16MB`.
-- **NVMe / SSD Access Cost**: `random_page_cost=1.1`, `checkpoint_completion_target=0.9`.
-- **GIN Indexing**: Specialized `USING GIN (raw_signals jsonb_path_ops)` and `USING GIN (reasons jsonb_path_ops)` for sub-millisecond JSON query filtering.
-- **Partial Indexing**: High-velocity partial B-tree index `CREATE INDEX idx_review_pending ON review_queue (app_id, created_at DESC) WHERE status = 'pending';` keeping pending review lookups sub-millisecond even with millions of past events.
-- **Connection Pool**: Built with `pg.Pool` with connection timeouts, statement timeouts (`10000ms`), and graceful connection release.
+### 3. Prisma ORM Optimizations
+- **Zero N+1 Cluster Generation**: Replaced sequential round-trip queries in `clusterService` with batched `prisma.account.findMany({ where: { fingerprintId: { in: fpIds } } })`, shrinking 31 sequential database round-trips to just 2 queries.
+- **Pipelined Metrics Transactions**: `analytics/overview` executes 5 concurrent count queries via a single `prisma.$transaction([ ... ])` pipeline.
+- **Atomic Multi-Table Decisions**: Review queue actions (`approve`, `reject`, `abuser`) execute in an atomic transaction (`prisma.$transaction`) across `reviewQueue`, `events`, `fingerprints`, and `accounts`.
+- **Singleton Connection Management**: Prevents connection exhaustion in serverless, dev watch-mode, and automated test runners.
+- **Safe BigInt Serialization**: Global JSON prototype handling for millisecond timestamps without serialization overhead.
 
-### 4. Running Locally with WSL Docker
+### 4. Running Locally with WSL Docker & Prisma
 ```bash
 # 1. Start PostgreSQL in WSL Docker (tuned for high throughput)
 npm run docker:up
 
-# 2. Check container health status
-npm run docker:ps
+# 2. Sync schema and generate Prisma Client
+npm run prisma:generate
+npm run prisma:push
 
 # 3. Start the AbuseShield backend and dashboard
 npm start

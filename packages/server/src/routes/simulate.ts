@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 import { evaluateRisk } from '../services/riskEngine';
 
 export const simulateRouter = Router();
@@ -117,10 +118,19 @@ simulateRouter.post('/simulate/scenario', async (req: Request, res: Response) =>
     }
 
     if (scenario === 'seed_demo_data') {
-      await db.execute('DELETE FROM review_queue WHERE app_id = $1', [APP_ID]);
-      await db.execute('DELETE FROM accounts WHERE app_id = $1', [APP_ID]);
-      await db.execute('DELETE FROM fingerprints WHERE app_id = $1', [APP_ID]);
-      await db.execute('DELETE FROM events WHERE app_id = $1', [APP_ID]);
+      if (db.isPostgres) {
+        await prisma.$transaction([
+          prisma.reviewQueue.deleteMany({ where: { appId: APP_ID } }),
+          prisma.account.deleteMany({ where: { appId: APP_ID } }),
+          prisma.fingerprint.deleteMany({ where: { appId: APP_ID } }),
+          prisma.event.deleteMany({ where: { appId: APP_ID } }),
+        ]);
+      } else {
+        await db.execute('DELETE FROM review_queue WHERE app_id = $1', [APP_ID]);
+        await db.execute('DELETE FROM accounts WHERE app_id = $1', [APP_ID]);
+        await db.execute('DELETE FROM fingerprints WHERE app_id = $1', [APP_ID]);
+        await db.execute('DELETE FROM events WHERE app_id = $1', [APP_ID]);
+      }
 
       // 1. Seed Clean Legitimate Users
       const legitUsers = [

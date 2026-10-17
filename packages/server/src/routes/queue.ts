@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 
 export const queueRouter = Router();
 
@@ -76,6 +77,60 @@ queueRouter.get('/review-queue', async (req: Request, res: Response) => {
  */
 queueRouter.get('/review-queue/:id', async (req: Request, res: Response) => {
   try {
+    if (db.isPostgres) {
+      const queueItem = await prisma.reviewQueue.findUnique({
+        where: { id: req.params.id },
+        include: { event: true },
+      });
+
+      if (!queueItem || queueItem.appId !== APP_ID) {
+        return res.status(404).json({ error: 'Review item not found' });
+      }
+
+      const [fp, linkedAccounts, eventTimeline] = await Promise.all([
+        prisma.fingerprint.findUnique({
+          where: { id_appId: { id: queueItem.fingerprintId, appId: APP_ID } },
+        }),
+        prisma.account.findMany({
+          where: { appId: APP_ID, fingerprintId: queueItem.fingerprintId },
+          orderBy: { firstSeenAt: 'desc' },
+          select: { email: true, status: true, firstSeenAt: true, lastSeenAt: true, ipAddress: true },
+        }),
+        prisma.event.findMany({
+          where: { appId: APP_ID, fingerprintId: queueItem.fingerprintId },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: { id: true, eventType: true, email: true, ipAddress: true, riskScore: true, status: true, createdAt: true },
+        }),
+      ]);
+
+      const item = {
+        id: queueItem.id,
+        event_id: queueItem.eventId,
+        email: queueItem.email,
+        fingerprint_id: queueItem.fingerprintId,
+        risk_score: queueItem.riskScore,
+        reasons: queueItem.reasons,
+        status: queueItem.status,
+        reviewer_notes: queueItem.reviewerNotes,
+        reviewed_at: queueItem.reviewedAt,
+        created_at: queueItem.createdAt,
+        raw_signals: queueItem.event.rawSignals,
+        event_type: queueItem.event.eventType,
+        ip_address: queueItem.event.ipAddress,
+        user_agent: queueItem.event.userAgent,
+        risk_level: queueItem.event.riskLevel,
+        linked_accounts_count: fp?.linkedAccountsCount ?? 1,
+        is_banned: fp?.isBanned ?? 0,
+      };
+
+      return res.json({
+        item,
+        linkedAccounts,
+        eventTimeline,
+      });
+    }
+
     const item = await db.queryOne(
       `SELECT r.*, e.ip_address, e.user_agent, e.raw_signals, e.event_type,
               f.first_seen_at as fp_first_seen, f.last_seen_at as fp_last_seen,
@@ -142,6 +197,49 @@ queueRouter.post('/review-queue/:id/decision', async (req: Request, res: Respons
 
     const now = Date.now();
 
+    // Atomic transaction using Prisma ORM when PostgreSQL is active
+    if (db.isPostgres) {
+      await prisma.$transaction(async (tx) => {
+        await tx.reviewQueue.update({
+          where: { id: req.params.id },
+          data: {
+            status: decision,
+            reviewerNotes: notes,
+            reviewedAt: BigInt(now),
+          },
+        });
+
+        await tx.event.update({
+          where: { id: item.event_id },
+          data: { status: decision },
+        });
+
+        if (decision === 'abuser') {
+          await tx.fingerprint.update({
+            where: { id_appId: { id: item.fingerprint_id, appId: APP_ID } },
+            data: { isBanned: 1, tags: 'abuser' },
+          });
+
+          await tx.account.updateMany({
+            where: { fingerprintId: item.fingerprint_id, appId: APP_ID },
+            data: { status: 'banned' },
+          });
+        } else if (decision === 'approved' && item.email) {
+          await tx.account.updateMany({
+            where: { email: item.email, appId: APP_ID },
+            data: { status: 'approved' },
+          });
+        }
+      });
+
+      return res.json({
+        success: true,
+        decision,
+        reviewedAt: now,
+      });
+    }
+
+    // Fallback path for SQLite
     await db.execute(
       `UPDATE review_queue
        SET status = $1, reviewer_notes = $2, reviewed_at = $3

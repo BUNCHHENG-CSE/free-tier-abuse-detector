@@ -1,4 +1,5 @@
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 
 export interface ClusterNode {
   id: string;
@@ -30,7 +31,122 @@ export async function getClusterGraph(appId: string): Promise<ClusterGraph> {
   const nodesMap = new Map<string, ClusterNode>();
   const links: ClusterLink[] = [];
 
-  // 1. Fetch fingerprints with multi-accounting or high activity
+  // Optimized ORM path using Prisma with zero N+1 queries
+  if (db.isPostgres) {
+    const fps = await prisma.fingerprint.findMany({
+      where: { appId },
+      orderBy: [
+        { linkedAccountsCount: 'desc' },
+        { totalEvents: 'desc' },
+      ],
+      take: 30,
+      select: {
+        id: true,
+        totalEvents: true,
+        linkedAccountsCount: true,
+        primaryIp: true,
+        isBanned: true,
+      },
+    });
+
+    const fpIds = fps.map((f) => f.id);
+
+    // Single batched query for all accounts linked to these fingerprints
+    const allAccounts = fpIds.length > 0
+      ? await prisma.account.findMany({
+          where: {
+            appId,
+            fingerprintId: { in: fpIds },
+          },
+          orderBy: { firstSeenAt: 'desc' },
+          select: {
+            id: true,
+            email: true,
+            status: true,
+            ipAddress: true,
+            fingerprintId: true,
+          },
+        })
+      : [];
+
+    // Group accounts by fingerprintId in memory O(N)
+    const accountsByFp = new Map<string, typeof allAccounts>();
+    for (const acc of allAccounts) {
+      const list = accountsByFp.get(acc.fingerprintId) || [];
+      if (list.length < 15) {
+        list.push(acc);
+        accountsByFp.set(acc.fingerprintId, list);
+      }
+    }
+
+    let multiAccountDevices = 0;
+    let totalAccountsInClusters = 0;
+
+    for (const fp of fps) {
+      if (fp.linkedAccountsCount > 1) {
+        multiAccountDevices++;
+      }
+
+      const shortId = `${fp.id.slice(0, 11)}...`;
+      nodesMap.set(fp.id, {
+        id: fp.id,
+        label: `Device ${shortId}`,
+        type: 'fingerprint',
+        count: fp.linkedAccountsCount,
+        isBanned: fp.isBanned === 1,
+      });
+
+      if (fp.primaryIp) {
+        const ipNodeId = `ip_${fp.primaryIp}`;
+        if (!nodesMap.has(ipNodeId)) {
+          nodesMap.set(ipNodeId, {
+            id: ipNodeId,
+            label: `IP: ${fp.primaryIp}`,
+            type: 'ip',
+          });
+        }
+
+        links.push({
+          source: fp.id,
+          target: ipNodeId,
+          type: 'CONNECTED_VIA',
+        });
+      }
+
+      const accounts = accountsByFp.get(fp.id) || [];
+      totalAccountsInClusters += accounts.length;
+
+      accounts.forEach((acc) => {
+        const accNodeId = `acc_${acc.email}`;
+        if (!nodesMap.has(accNodeId)) {
+          nodesMap.set(accNodeId, {
+            id: accNodeId,
+            label: acc.email,
+            type: 'account',
+            status: acc.status || undefined,
+          });
+        }
+
+        links.push({
+          source: accNodeId,
+          target: fp.id,
+          type: 'LINKED_TO',
+        });
+      });
+    }
+
+    return {
+      nodes: Array.from(nodesMap.values()),
+      links,
+      stats: {
+        totalClusters: fps.length,
+        multiAccountDevices,
+        totalAccountsInClusters,
+      },
+    };
+  }
+
+  // Fallback path for SQLite
   const fps = await db.query<{
     id: string;
     total_events: number;
@@ -80,7 +196,6 @@ export async function getClusterGraph(appId: string): Promise<ClusterGraph> {
       });
     }
 
-    // Fetch accounts linked to this fingerprint
     const accounts = await db.query<{ id: string; email: string; status: string; ip_address: string }>(
       `SELECT id, email, status, ip_address FROM accounts
        WHERE app_id = $1 AND fingerprint_id = $2

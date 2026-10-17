@@ -15,6 +15,8 @@
     "dev:dashboard": "npm --workspace=@abuseshield/dashboard run dev",
     "start": "node packages/server/dist/index.js",
     "test": "node --test packages/sdk/dist/sdk.test.js packages/server/dist/server.test.js",
+    "prisma:generate": "node node_modules/prisma/build/index.js generate --schema=packages/server/prisma/schema.prisma",
+    "prisma:push": "node node_modules/prisma/build/index.js db push --schema=packages/server/prisma/schema.prisma",
     "docker:up": "wsl docker compose up -d",
     "docker:down": "wsl docker compose down",
     "docker:logs": "wsl docker logs -f abuseshield_postgres",
@@ -31,5 +33,8 @@
     "saas"
   ],
   "author": "AbuseShield Team",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  }
 }

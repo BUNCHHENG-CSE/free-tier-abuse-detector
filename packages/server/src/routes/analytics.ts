@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/database';
+import { prisma } from '../db/prisma';
 import { getClusterGraph } from '../services/clusterService';
 
 export const analyticsRouter = Router();
@@ -8,35 +9,53 @@ const APP_ID = 'app_demo_default';
 
 analyticsRouter.get('/analytics/overview', async (req: Request, res: Response) => {
   try {
-    const totalEventsRow = await db.queryOne<{ cnt: number | string }>(
-      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1`,
-      [APP_ID]
-    );
-    const totalEvents = parseInt(String(totalEventsRow?.cnt || 0), 10);
+    let totalEvents = 0;
+    let totalSignups = 0;
+    let flaggedCount = 0;
+    let pendingReviewCount = 0;
+    let multiAccountFpCount = 0;
 
-    const totalSignupsRow = await db.queryOne<{ cnt: number | string }>(
-      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND event_type = 'signup'`,
-      [APP_ID]
-    );
-    const totalSignups = parseInt(String(totalSignupsRow?.cnt || 0), 10);
+    // Pipelined count queries via Prisma ORM when PostgreSQL is active
+    if (db.isPostgres) {
+      const counts = await prisma.$transaction([
+        prisma.event.count({ where: { appId: APP_ID } }),
+        prisma.event.count({ where: { appId: APP_ID, eventType: 'signup' } }),
+        prisma.event.count({ where: { appId: APP_ID, status: { in: ['flagged', 'rejected', 'abuser'] } } }),
+        prisma.reviewQueue.count({ where: { appId: APP_ID, status: 'pending' } }),
+        prisma.fingerprint.count({ where: { appId: APP_ID, linkedAccountsCount: { gt: 1 } } }),
+      ]);
+      [totalEvents, totalSignups, flaggedCount, pendingReviewCount, multiAccountFpCount] = counts;
+    } else {
+      const totalEventsRow = await db.queryOne<{ cnt: number | string }>(
+        `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1`,
+        [APP_ID]
+      );
+      totalEvents = parseInt(String(totalEventsRow?.cnt || 0), 10);
 
-    const flaggedRow = await db.queryOne<{ cnt: number | string }>(
-      `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND status IN ('flagged', 'rejected', 'abuser')`,
-      [APP_ID]
-    );
-    const flaggedCount = parseInt(String(flaggedRow?.cnt || 0), 10);
+      const totalSignupsRow = await db.queryOne<{ cnt: number | string }>(
+        `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND event_type = 'signup'`,
+        [APP_ID]
+      );
+      totalSignups = parseInt(String(totalSignupsRow?.cnt || 0), 10);
 
-    const pendingRow = await db.queryOne<{ cnt: number | string }>(
-      `SELECT COUNT(*) as cnt FROM review_queue WHERE app_id = $1 AND status = 'pending'`,
-      [APP_ID]
-    );
-    const pendingReviewCount = parseInt(String(pendingRow?.cnt || 0), 10);
+      const flaggedRow = await db.queryOne<{ cnt: number | string }>(
+        `SELECT COUNT(*) as cnt FROM events WHERE app_id = $1 AND status IN ('flagged', 'rejected', 'abuser')`,
+        [APP_ID]
+      );
+      flaggedCount = parseInt(String(flaggedRow?.cnt || 0), 10);
 
-    const multiAccountFpRow = await db.queryOne<{ cnt: number | string }>(
-      `SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = $1 AND linked_accounts_count > 1`,
-      [APP_ID]
-    );
-    const multiAccountFpCount = parseInt(String(multiAccountFpRow?.cnt || 0), 10);
+      const pendingRow = await db.queryOne<{ cnt: number | string }>(
+        `SELECT COUNT(*) as cnt FROM review_queue WHERE app_id = $1 AND status = 'pending'`,
+        [APP_ID]
+      );
+      pendingReviewCount = parseInt(String(pendingRow?.cnt || 0), 10);
+
+      const multiAccountFpRow = await db.queryOne<{ cnt: number | string }>(
+        `SELECT COUNT(*) as cnt FROM fingerprints WHERE app_id = $1 AND linked_accounts_count > 1`,
+        [APP_ID]
+      );
+      multiAccountFpCount = parseInt(String(multiAccountFpRow?.cnt || 0), 10);
+    }
 
     const denominator = totalSignups > 0 ? totalSignups : (totalEvents > 0 ? totalEvents : 1);
     const abuseSharePercent = parseFloat(((flaggedCount / denominator) * 100).toFixed(1));
