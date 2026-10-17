@@ -1,0 +1,30 @@
+{
+  "name": "abuse-shield-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free-Tier Abuse Detection & Lightweight Fingerprint SDK for Indie Developers & Freemium SaaS",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:sdk": "npm --workspace=@abuseshield/sdk run build",
+    "build:server": "npm --workspace=@abuseshield/server run build",
+    "build:dashboard": "npm --workspace=@abuseshield/dashboard run build",
+    "build": "npm run build:sdk && npm run build:server && npm run build:dashboard",
+    "dev:server": "npm --workspace=@abuseshield/server run dev",
+    "dev:dashboard": "npm --workspace=@abuseshield/dashboard run dev",
+    "start": "node packages/server/dist/index.js",
+    "test": "node --test packages/sdk/dist/sdk.test.js packages/server/dist/server.test.js"
+  },
+  "keywords": [
+    "fingerprint",
+    "abuse-detection",
+    "fraud-prevention",
+    "freemium",
+    "multi-accounting",
+    "anti-abuse",
+    "saas"
+  ],
+  "author": "AbuseShield Team",
+  "license": "MIT"
+}
