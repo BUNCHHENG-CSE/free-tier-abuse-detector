@@ -1,0 +1,171 @@
+// Prisma Schema for AbuseShield (Next.js Full-Stack)
+// Production: Neon Serverless PostgreSQL (via DATABASE_URL & @prisma/adapter-neon / pg)
+// Local Dev: Embedded SQLite (via SQLITE_PATH / data/abuseshield.sqlite when USE_SQLITE=true)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model App {
+  id          String        @id @db.VarChar(64)
+  name        String        @db.VarChar(255)
+  apiKey      String        @unique @map("api_key") @db.VarChar(128)
+  webhookUrl  String?       @map("webhook_url") @db.Text
+  createdAt   BigInt        @map("created_at")
+
+  rules         Rule?
+  events        Event[]
+  fingerprints  Fingerprint[]
+  accounts      Account[]
+  reviewQueue   ReviewQueue[]
+  deviceQuotas  DeviceQuota[]
+  powChallenges PoWChallenge[]
+
+  @@map("apps")
+}
+
+model Rule {
+  appId                String  @id @map("app_id") @db.VarChar(64)
+  maxRegistrations24h  Int     @default(3) @map("max_registrations_24h")
+  maxAccountsPerFp     Int     @default(2) @map("max_accounts_per_fp")
+  flagDisposableEmail  Int     @default(1) @map("flag_disposable_email") @db.SmallInt
+  flagHeadlessBot      Int     @default(1) @map("flag_headless_bot") @db.SmallInt
+  flagIpHopping        Int     @default(1) @map("flag_ip_hopping") @db.SmallInt
+  flagBehavioralBot    Int     @default(1) @map("flag_behavioral_bot") @db.SmallInt
+  flagTampering        Int     @default(1) @map("flag_tampering") @db.SmallInt
+  powEnabled           Int     @default(1) @map("pow_enabled") @db.SmallInt
+  powDifficulty        Int     @default(4) @map("pow_difficulty")
+  quotaLimit           Int     @default(50) @map("quota_limit")
+  discordWebhookUrl    String? @map("discord_webhook_url") @db.Text
+  slackWebhookUrl      String? @map("slack_webhook_url") @db.Text
+  minScoreToFlag       Int     @default(35) @map("min_score_to_flag")
+  webhookOnFlag        Int     @default(1) @map("webhook_on_flag") @db.SmallInt
+  updatedAt            BigInt  @map("updated_at")
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@map("rules")
+}
+
+model Event {
+  id               String       @id @db.VarChar(64)
+  appId            String       @map("app_id") @db.VarChar(64)
+  eventType        String       @map("event_type") @db.VarChar(64)
+  email            String?      @db.VarChar(255)
+  normalizedEmail  String?      @map("normalized_email") @db.VarChar(255)
+  userId           String?      @map("user_id") @db.VarChar(128)
+  fingerprintId    String       @map("fingerprint_id") @db.VarChar(64)
+  clientToken      String?      @map("client_token") @db.VarChar(64)
+  ipAddress        String       @map("ip_address") @db.VarChar(45)
+  userAgent        String?      @map("user_agent") @db.Text
+  riskScore        Int          @map("risk_score")
+  riskLevel        String       @map("risk_level") @db.VarChar(16)
+  reasons          Json         @default("[]")
+  status           String       @db.VarChar(32)
+  rawSignals       Json?        @map("raw_signals")
+  createdAt        BigInt       @map("created_at")
+
+  app         App          @relation(fields: [appId], references: [id], onDelete: Cascade)
+  reviewQueue ReviewQueue?
+
+  @@index([appId, fingerprintId, createdAt(sort: Desc)], map: "idx_events_fp_time")
+  @@index([appId, normalizedEmail], map: "idx_events_email")
+  @@index([appId, createdAt(sort: Desc)], map: "idx_events_created")
+  @@index([appId, status], map: "idx_events_status")
+  @@map("events")
+}
+
+model Fingerprint {
+  id                  String  @db.VarChar(64)
+  appId               String  @map("app_id") @db.VarChar(64)
+  firstSeenAt         BigInt  @map("first_seen_at")
+  lastSeenAt          BigInt  @map("last_seen_at")
+  totalEvents         Int     @default(1) @map("total_events")
+  linkedAccountsCount Int     @default(1) @map("linked_accounts_count")
+  primaryIp           String? @map("primary_ip") @db.VarChar(45)
+  canvasHash          String? @map("canvas_hash") @db.VarChar(64)
+  webglRenderer       String? @map("webgl_renderer") @db.Text
+  tags                String? @db.VarChar(64)
+  isBanned            Int     @default(0) @map("is_banned") @db.SmallInt
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@id([id, appId])
+  @@index([appId, linkedAccountsCount(sort: Desc)], map: "idx_fp_accounts")
+  @@map("fingerprints")
+}
+
+model Account {
+  id              String  @id @db.VarChar(64)
+  appId           String  @map("app_id") @db.VarChar(64)
+  email           String  @db.VarChar(255)
+  normalizedEmail String  @map("normalized_email") @db.VarChar(255)
+  userId          String? @map("user_id") @db.VarChar(128)
+  fingerprintId   String  @map("fingerprint_id") @db.VarChar(64)
+  ipAddress       String? @map("ip_address") @db.VarChar(45)
+  status          String? @default("active") @db.VarChar(32)
+  firstSeenAt     BigInt  @map("first_seen_at")
+  lastSeenAt      BigInt  @map("last_seen_at")
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, normalizedEmail], map: "idx_accounts_email")
+  @@index([appId, fingerprintId], map: "idx_accounts_fp")
+  @@map("accounts")
+}
+
+model ReviewQueue {
+  id            String  @id @db.VarChar(64)
+  appId         String  @map("app_id") @db.VarChar(64)
+  eventId       String  @unique @map("event_id") @db.VarChar(64)
+  email         String? @db.VarChar(255)
+  fingerprintId String  @map("fingerprint_id") @db.VarChar(64)
+  riskScore     Int     @map("risk_score")
+  reasons       Json    @default("[]")
+  status        String? @default("pending") @db.VarChar(32)
+  reviewerNotes String? @map("reviewer_notes") @db.Text
+  reviewedAt    BigInt? @map("reviewed_at")
+  createdAt     BigInt  @map("created_at")
+
+  app   App   @relation(fields: [appId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([appId, status, createdAt(sort: Desc)], map: "idx_review_status_time")
+  @@map("review_queue")
+}
+
+model DeviceQuota {
+  fingerprintId       String  @map("fingerprint_id") @db.VarChar(64)
+  appId               String  @map("app_id") @db.VarChar(64)
+  creditsAllocated    Int     @default(50) @map("credits_allocated")
+  creditsUsed         Int     @default(0) @map("credits_used")
+  linkedAccountsCount Int     @default(1) @map("linked_accounts_count")
+  isLocked            Int     @default(0) @map("is_locked") @db.SmallInt
+  lastUsedAt          BigInt  @map("last_used_at")
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@id([fingerprintId, appId])
+  @@map("device_quotas")
+}
+
+model PoWChallenge {
+  id            String  @id @db.VarChar(64)
+  appId         String  @map("app_id") @db.VarChar(64)
+  fingerprintId String  @map("fingerprint_id") @db.VarChar(64)
+  seed          String  @db.VarChar(128)
+  difficulty    Int     @default(4)
+  solved        Int     @default(0) @db.SmallInt
+  createdAt     BigInt  @map("created_at")
+  expiresAt     BigInt  @map("expires_at")
+
+  app App @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, fingerprintId])
+  @@map("pow_challenges")
+}

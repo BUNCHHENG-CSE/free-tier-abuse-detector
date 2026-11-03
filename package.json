@@ -1,40 +1,54 @@
 {
-  "name": "abuse-shield-monorepo",
-  "version": "1.0.0",
+  "name": "tct-shield",
+  "version": "2.0.0",
   "private": true,
-  "description": "Free-Tier Abuse Detection & Lightweight Fingerprint SDK for Indie Developers & Freemium SaaS",
-  "workspaces": [
-    "packages/*"
-  ],
+  "description": "TCT Shield — Lightweight Device Fingerprint & Free-Tier Abuse Detection Platform (Next.js Full-Stack + Neon PostgreSQL + Prisma + Local SQLite)",
   "scripts": {
-    "build:sdk": "npm --workspace=@abuseshield/sdk run build",
-    "build:server": "npm --workspace=@abuseshield/server run build",
-    "build:dashboard": "npm --workspace=@abuseshield/dashboard run build",
-    "build": "npm run build:sdk && npm run build:server && npm run build:dashboard",
-    "dev:server": "npm --workspace=@abuseshield/server run dev",
-    "dev:dashboard": "npm --workspace=@abuseshield/dashboard run dev",
-    "start": "node packages/server/dist/index.js",
-    "test": "node --test packages/sdk/dist/sdk.test.js packages/server/dist/server.test.js",
-    "prisma:generate": "node node_modules/prisma/build/index.js generate --schema=packages/server/prisma/schema.prisma",
-    "prisma:push": "node node_modules/prisma/build/index.js db push --schema=packages/server/prisma/schema.prisma",
-    "docker:up": "wsl docker compose up -d",
-    "docker:down": "wsl docker compose down",
-    "docker:logs": "wsl docker logs -f abuseshield_postgres",
-    "docker:ps": "wsl docker ps",
-    "db:seed": "node -e \"fetch('http://localhost:4000/api/v1/simulate/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: 'seed_demo_data' }) }).then(r => r.json()).then(console.log)\""
+    "dev": "next dev --port 3000",
+    "build": "bun run build:sdk && prisma generate && next build",
+    "build:sdk": "node scripts/build-sdk.mjs",
+    "start": "next start --port 3000",
+    "lint": "eslint",
+    "test": "bun test",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
+    "db:seed": "node -e \"fetch('http://localhost:3000/api/v1/simulate/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: 'seed_demo_data' }) }).then(r => r.json()).then(console.log)\""
   },
-  "keywords": [
-    "fingerprint",
-    "abuse-detection",
-    "fraud-prevention",
-    "freemium",
-    "multi-accounting",
-    "anti-abuse",
-    "saas"
-  ],
-  "author": "AbuseShield Team",
-  "license": "MIT",
   "dependencies": {
-    "@prisma/client": "^6.19.3"
-  }
+    "@neondatabase/serverless": "^1.0.0",
+    "@prisma/adapter-neon": "^6.19.3",
+    "@prisma/client": "^6.19.3",
+    "lucide-react": "^0.475.0",
+    "next": "16.4.3",
+    "pg": "^8.13.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.11.11",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "esbuild": "^0.25.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.3",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "bun@1.4.0",
+  "ignoreScripts": [
+    "sharp",
+    "unrs-resolver"
+  ],
+  "trustedDependencies": [
+    "sharp",
+    "unrs-resolver",
+    "@prisma/client",
+    "@prisma/engines",
+    "prisma",
+    "esbuild"
+  ]
 }

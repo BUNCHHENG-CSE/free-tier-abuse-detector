@@ -1,9 +1,9 @@
-# AbuseShield 🛡️
+# TCT Shield 🛡️
 ### Lightweight Fingerprint SDK & Free-Tier Abuse Detection Platform
 
 > **Stop free-tier revenue leakage and multi-accounting for freemium SaaS teams—without $500/mo enterprise lock-in.**
 
-[![Tests](https://img.shields.io/badge/Tests-8%20Passed-emerald.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-13%20Passed-emerald.svg)](#testing)
 [![SDK Size](https://img.shields.io/badge/SDK%20Bundle-%3C10KB%20(5.2KB%20gz)-indigo.svg)](#lightweight-browser-sdk)
 [![Node.js](https://img.shields.io/badge/Node.js-24%20%2B%20native%20node%3Asqlite-blue.svg)](#architecture)
 [![Pricing Anchor](https://img.shields.io/badge/Pricing%20Anchor-%2429--%2479%2Fmo-emerald.svg)](#pricing-anchors)
@@ -19,7 +19,7 @@ When indie developers and small teams run freemium or free-trial SaaS products, 
 
 Enterprise options like [Castle.io](https://castle.io/) (~$500/month) or FingerprintJS Pro (~$200/month) are far too heavy and expensive for bootstrapped products.
 
-**AbuseShield** delivers:
+**TCT Shield** delivers:
 1. **Ultra-lightweight Browser Fingerprint JS SDK (<10KB raw, 5.2KB gzipped)**: Zero heavy dependencies, executes in <15ms.
 2. **Transparent Rule Engine**: Flags repeated registrations (N registrations in 24h) and multi-accounting (M accounts per device).
 3. **No Black-Box Blocking**: Only flagging and a human-in-the-loop **Manual Review Queue**.
@@ -30,28 +30,39 @@ Enterprise options like [Castle.io](https://castle.io/) (~$500/month) or Fingerp
 ## 🏗️ System Architecture
 
 ```
-Free-Tier Abuse Detection & Lightweight Fingerprint SDK/
-├── packages/
-│   ├── sdk/                     # Ultra-lightweight Browser Fingerprint JS SDK (< 10 KB)
-│   │   ├── src/
-│   │   │   ├── signals/         # Canvas, WebGL, Screen, Fonts, Audio, System, Bot, Storage
-│   │   │   ├── hash.ts          # Deterministic MurmurHash3 algorithm
-│   │   │   └── index.ts         # AbuseShield.init(), getFingerprint(), verify(), attachForm()
-│   │   └── dist/                # abuse-shield.min.js (5.2KB gz), index.esm.js, index.cjs
+tct-shield/
+├── src/
+│   ├── app/                     # Next.js 16 App Router Platform
+│   │   ├── page.tsx             # TCT Shield Unified Operations Dashboard
+│   │   ├── demo/page.tsx        # "VoxelAI Studio" Interactive SaaS Sandbox
+│   │   └── api/v1/              # Unified Anti-Abuse REST API Endpoints
+│   │       ├── verify/          # Core risk assessment & adaptive PoW challenge
+│   │       ├── quota/           # Cross-account device trial quota pool CRUD
+│   │       ├── pow/             # Proof-of-Work challenge creation & validation
+│   │       ├── review-queue/    # Manual triage queue & human decision logger
+│   │       ├── fingerprints/    # Device hardware registry & ban enforcement
+│   │       ├── rules/           # Real-time rule thresholds & webhook dispatcher
+│   │       ├── analytics/       # Velocity metrics HUD & cluster graph visualizer
+│   │       └── action/quick-ban/# 1-Click device ban action from Discord & Slack
 │   │
-│   ├── server/                  # Anti-Abuse Backend & Risk Scoring Engine
-│   │   ├── prisma/              # Prisma ORM schema & migrations for PostgreSQL
-│   │   ├── src/
-│   │   │   ├── db/              # Prisma Client singleton, PostgreSQL pool & SQLite fallback
-│   │   │   ├── services/        # RiskEngine, EmailValidator, IPEnricher, ClusterService
-│   │   │   └── routes/          # /verify, /review-queue, /fingerprints, /rules, /analytics
-│   │   └── dist/
+│   ├── components/dashboard/    # Next.js Dashboard HUD & Visualizer Components
+│   │   ├── tabs/                # Overview, Queue, Fingerprints, Quotas, Clusters, Rules, Integration, Playground
+│   │   ├── Header.tsx           # Attack simulators, live status indicator, and quick links
+│   │   ├── Sidebar.tsx          # Navigation, feature highlights, and pricing comparison
+│   │   └── ReviewModal.tsx      # Deep investigation modal with 1-click triage actions
 │   │
-│   └── dashboard/               # Modern Dark-Mode Indie Admin Dashboard (React 18 + Vite)
-│       └── src/                 # Overview, ReviewQueue, Fingerprints, ClusterVisualizer, Rules
+│   ├── lib/                     # Server Services & Multi-Engine Database Layer
+│   │   ├── db/                  # Dual SQLite (node:sqlite WAL) + Neon PostgreSQL (Prisma)
+│   │   └── services/            # RiskEngine, QuotaService, PoWService, WebhookService, ClusterService
+│   │
+│   └── sdk/                     # Ultra-Lightweight Browser Fingerprint JS SDK (<10KB)
+│       ├── signals/             # Canvas, Behavior, WebGL, Screen, Fonts, Audio, System, Bot, Storage
+│       ├── pow.ts               # Web Crypto SHA-256 micro-puzzle solver
+│       └── index.ts             # AbuseShield client with automatic form capture
 │
-└── demo-saas/                   # "VoxelAI Studio" Live Mock SaaS Signup Sandbox
-    └── index.html               # Real-time fingerprinting demo & attack simulator
+├── prisma/schema.prisma         # Prisma schema with Quota, PoW, and v2.0 rule flags
+├── public/sdk/abuse-shield.min.js # Standalone IIFE bundle (6.38 KB gzip)
+└── scripts/build-sdk.mjs        # Production ESBuild bundler
 ```
 
 ---
@@ -62,17 +73,19 @@ The SDK collects hardware and environment signals without invasive permissions:
 
 | Signal Vector | How It Works | Entropy Contribution |
 | :--- | :--- | :--- |
-| **Canvas Fingerprint** | Offscreen 2D canvas drawing text, emojis, shadows, gradients, and winding rules. Anti-aliasing engine and GPU rasterization produce unique hashes. | High |
+| **Canvas Fingerprint & Dual-Pass Farbling** | Offscreen 2D canvas drawing text, emojis, shadows, gradients, and winding rules. Anti-aliasing engine and GPU rasterization produce unique hashes. Dual-pass read detects Brave Shields and Canvas Blocker noise injection. | High + Tamper Detection |
+| **Behavioral Biometrics** | Passive form interaction timer, keystroke standard deviation variance, mouse trajectory curvature entropy, and paste ratios. Catches bots submitting forms in <600ms. | Critical |
 | **WebGL GPU Architecture** | Queries `WEBGL_debug_renderer_info` for unmasked vendor (`NVIDIA`, `Intel`, `Apple`) and unmasked renderer (e.g. `RTX 3080`, `Apple M2 Pro`) + shader precision. | High |
-| **Screen & Display** | Resolution, color depth, pixel depth, `window.devicePixelRatio`, orientation, touch point count. | Medium |
+| **Screen & Display Consistency** | Resolution, color depth, pixel depth, `window.devicePixelRatio`, orientation, touch point count, and screen paradox detection (`availWidth > width` or `outerWidth === 0`). | Medium |
 | **Font Combinations** | Fast glyph measurement comparing test text widths against base fallback fonts across 18 discriminating OS fonts. Executes in <4ms. | High |
 | **Audio Dynamics** | OfflineAudioContext oscillator through a dynamics compressor computing frequency sample sum. | Medium |
+| **Adaptive Proof-of-Work (PoW)** | Hardware-accelerated WebWorker SHA-256 micro-puzzle solver for high-risk challenges without third-party captchas. | Frictionless Anti-Bot |
 | **Bot & Automation** | Detects `navigator.webdriver`, headless user-agents, Selenium, Puppeteer, and automation flags. | Critical |
 | **Persistent Fallback** | Synchronized local device token stored in `localStorage` & cookies (`_as_fp_token`). | High |
 
 ### Bundle Size Audit
-- **Raw Minified Standalone Bundle**: 12.6 KB
-- **Gzipped Transfer Size**: **5.2 KB** *(Target <10KB successfully satisfied)*
+- **Raw Minified Standalone Bundle**: 16.3 KB
+- **Gzipped Transfer Size**: **6.4 KB** *(Target <10KB successfully satisfied)*
 - **Execution Latency**: **~15ms**
 
 ---
@@ -86,8 +99,24 @@ AbuseShield evaluates each registration and outputs a composite **Risk Score (0 
 3. **Disposable Email Detection**: Matches disposable temporary email domains (Mailinator, GuerrillaMail, 10MinuteMail, YOPmail, Temp-Mail) → **+35 Risk Points** (`DISPOSABLE_EMAIL`).
 4. **Subaddressing / Plus Alias Reuse**: Strips `+alias` or dots and correlates against existing registered mailboxes → **+25 Risk Points** (`EMAIL_ALIAS_CLUSTERING`).
 5. **Headless / WebDriver Automation**: `navigator.webdriver` is true or headless Chrome runtime detected → **+45 Risk Points** (`AUTOMATED_BROWSER_HEADLESS`).
-6. **VPN IP Hopping Signature**: Same browser hardware fingerprint cycling 3+ distinct IP subnets within 12 hours → **+20 Risk Points** (`VPN_OR_RAPID_IP_HOPPING`).
-7. **Known Abuser History**: Hardware fingerprint previously marked as abuser in review queue → **+55 Risk Points** (`DEVICE_BANNED_HISTORY`).
+6. **Instant Submission & Robotic Cadence**: Form submitted in <600ms or robotic zero-curvature mouse telemetry → **+40 Risk Points** (`BOT_CADENCE_DETECTED`).
+7. **Canvas Farbling & Anti-Fingerprint Spoofing**: Brave Shields pixel noise injection or OS environment spoofing detected → **+40 Risk Points** (`FINGERPRINT_FARBLING_DETECTED`).
+8. **VPN IP Hopping Signature**: Same browser hardware fingerprint cycling 3+ distinct IP subnets within 12 hours → **+20 Risk Points** (`VPN_OR_RAPID_IP_HOPPING`).
+9. **Known Abuser History**: Hardware fingerprint previously marked as abuser in review queue → **+55 Risk Points** (`DEVICE_BANNED_HISTORY`).
+
+---
+
+## 💳 Device-Bound Trial Quota Pool & Alerting
+
+- **Cross-Account Trial Credit Guard (`/api/v1/quota`)**:
+  - Aggregates free credits across all accounts sharing the same physical device fingerprint.
+  - When an abuser creates 5 accounts with burner emails, their combined trial operations are capped at your configured quota limit (e.g. 50 credits), preventing free compute / GPU / OpenAI API token harvesting.
+- **Adaptive Proof-of-Work (`/api/v1/pow`)**:
+  - Serves an automated challenge (`action: 'challenge'`) when a registration scores in the suspicious range.
+  - Legitimate human browsers solve the SHA-256 micro-puzzle in ~200ms seamlessly; mass bot scripts face catastrophic CPU exhaustion.
+- **Discord & Slack Real-Time Alerts with 1-Click Ban**:
+  - Rich Discord Embeds and Slack Block Kit notifications dispatched in real-time when abuse is flagged.
+  - Direct `[⚡ 1-Click Ban Device]` link in the chat message to immediately ban the hardware fingerprint and lock its trial quota pool.
 
 ### Action & Review Policy
 - **Score 0 – 30 (`LOW`)**: Action `allow`. Legitimate user registration.
@@ -103,35 +132,44 @@ AbuseShield evaluates each registration and outputs a composite **Risk Score (0 
 - Node.js v20+ or v24+
 - Docker & WSL2 (for production-grade PostgreSQL locally) OR zero-dependency SQLite fallback
 
-### 2. Dual Database Engine with Prisma ORM
-AbuseShield supports **two execution profiles** with Prisma ORM:
+### 2. Dual Database Engine Support (SQLite & PostgreSQL)
+AbuseShield supports **two execution profiles** out of the box:
 
-| Profile | Engine / ORM | Best For | Configuration |
+| Profile | Engine / Driver | Best For | Configuration |
 | :--- | :--- | :--- | :--- |
-| **Production & Local WSL Docker** | **PostgreSQL 16 + Prisma ORM 6** | Strongly-typed queries, atomic transactions, batching (zero N+1), GIN JSONB indexing | Set `DATABASE_URL=postgres://...` in `.env` |
-| **Zero-Config Lightweight** | **Native `node:sqlite`** | Instant local hacking, offline testing, CI environments without Docker | Leave `DATABASE_URL` unset in `.env` |
+| **Local Development (Default)** | **Embedded `node:sqlite` (WAL mode)** | Instant zero-config hacking, zero Docker needed, offline testing, CI | `DB_DRIVER=sqlite` in `.env` (or leave `DATABASE_URL` commented) |
+| **Production & Local WSL Docker** | **PostgreSQL 16 + Prisma ORM 6** | High-concurrency production, distributed nodes, GIN indexing | `DB_DRIVER=postgres` & `DATABASE_URL=postgres://...` in `.env` |
 
-### 3. Prisma ORM Optimizations
+> [!TIP]
+> **Resilient Fallback**: If `DATABASE_URL` is configured for PostgreSQL but the Docker container is stopped, AbuseShield automatically detects `ECONNREFUSED` and falls back to local SQLite without crashing.
+
+### 3. Prisma ORM Optimizations (PostgreSQL Mode)
 - **Zero N+1 Cluster Generation**: Replaced sequential round-trip queries in `clusterService` with batched `prisma.account.findMany({ where: { fingerprintId: { in: fpIds } } })`, shrinking 31 sequential database round-trips to just 2 queries.
 - **Pipelined Metrics Transactions**: `analytics/overview` executes 5 concurrent count queries via a single `prisma.$transaction([ ... ])` pipeline.
 - **Atomic Multi-Table Decisions**: Review queue actions (`approve`, `reject`, `abuser`) execute in an atomic transaction (`prisma.$transaction`) across `reviewQueue`, `events`, `fingerprints`, and `accounts`.
 - **Singleton Connection Management**: Prevents connection exhaustion in serverless, dev watch-mode, and automated test runners.
 - **Safe BigInt Serialization**: Global JSON prototype handling for millisecond timestamps without serialization overhead.
 
-### 4. Running Locally with WSL Docker & Prisma
+### 4. Running Locally with SQLite (Zero Docker Needed)
 ```bash
-# 1. Start PostgreSQL in WSL Docker (tuned for high throughput)
+# 1. Start the backend with local SQLite (reads packages/data/abuseshield.sqlite)
+npm start
+
+# 2. In another terminal, seed demo abuse scenarios (bot farm, VPN rotator, multi-account harvester)
+npm run db:seed
+```
+
+Or for PostgreSQL via WSL Docker:
+```bash
+# 1. Start PostgreSQL in WSL Docker
 npm run docker:up
 
-# 2. Sync schema and generate Prisma Client
+# 2. Sync schema with Prisma
 npm run prisma:generate
 npm run prisma:push
 
-# 3. Start the AbuseShield backend and dashboard
+# 3. Start server
 npm start
-
-# 4. Populate realistic demo abuse clusters (bot farm, VPN rotator, multi-account harvester)
-npm run db:seed
 ```
 The server will start at **`http://localhost:4000`**:
 - **Admin Dashboard**: [http://localhost:4000](http://localhost:4000)

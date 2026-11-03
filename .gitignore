@@ -1,11 +1,107 @@
+# ==========================================
+# Dependencies & Package Managers
+# ==========================================
 node_modules/
-*/node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# ==========================================
+# Next.js & Build Outputs
+# ==========================================
+.next/
+out/
+build/
 dist/
-*/dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Optional: sourcemap files for SDK bundles
+public/sdk/*.map
+
+# ==========================================
+# Local Database & SQLite Data
+# ==========================================
 data/
 packages/data/
-*.sqlite*
-.DS_Store
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# ==========================================
+# Caches & Temporary Files
+# ==========================================
+.cache/
+.turbo/
+.eslintcache
+.stylelintcache
+tmp/
+temp/
+*.tmp
+
+# ==========================================
+# Testing & Code Coverage
+# ==========================================
+coverage/
+.nyc_output/
+*.lcov
+
+# ==========================================
+# Deployment Platforms
+# ==========================================
+.vercel/
+
+# ==========================================
+# Logs & Debugging
+# ==========================================
+logs/
 *.log
 npm-debug.log*
-.env
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# ==========================================
+# IDE & Code Editors
+# ==========================================
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+*~
+
+# ==========================================
+# Operating System Artifacts
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
